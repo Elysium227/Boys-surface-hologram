@@ -1,6 +1,6 @@
 # Boy's Surface — Holographic Particle Simulation
 
-![Boy's Surface Screenshot](screenshot.png)
+![Boy's Surface Screenshot](screenshot.jpg)
 
 > A non-orientable manifold with no boundary and a single self-intersection curve, rendered as a dense holographic particle field.
 
