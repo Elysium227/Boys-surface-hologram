@@ -4,7 +4,7 @@
 
 > A non-orientable manifold with no boundary and a single self-intersection curve, rendered as a dense holographic particle field.
 
-**[Live Demo →](https://your-demo-link-here)**
+**[Live Demo →](https://elysium227.github.io/Boys-surface-hologram/)**
 
 ---
 
