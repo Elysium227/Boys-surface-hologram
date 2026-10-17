@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BOY'S SURFACE — HOLOGRAPHIC</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Courier New', Courier, monospace;
+    user-select: none;
+  }
+
+  canvas { display: block; }
+
+  /* scanline overlay */
+  #scanlines {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 3px,
+      rgba(0,0,0,0.08) 3px,
+      rgba(0,0,0,0.08) 4px
+    );
+    z-index: 10;
+  }
+
+  /* vignette */
+  #vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.7) 100%);
+    z-index: 9;
+  }
+
+  /* panel base */
+  .panel {
+    position: fixed;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.10);
+    backdrop-filter: blur(16px) saturate(0);
+    -webkit-backdrop-filter: blur(16px) saturate(0);
+    padding: 14px 18px;
+    color: rgba(255,255,255,0.55);
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    line-height: 2;
+    z-index: 20;
+  }
+
+  .panel .row-label {
+    color: rgba(255,255,255,0.22);
+    text-transform: uppercase;
+    font-size: 8.5px;
+    letter-spacing: 0.18em;
+  }
+
+  .panel .row-val {
+    color: rgba(255,255,255,0.88);
+    font-size: 10px;
+  }
+
+  .panel hr {
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    margin: 7px 0;
+  }
+
+  #panel-left { top: 28px; left: 28px; min-width: 188px; }
+  #panel-right { top: 28px; right: 28px; text-align: right; min-width: 188px; }
+  #panel-bottom {
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 22px;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.25);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+  }
+
+  #panel-right h1 {
+    font-size: 15px;
+    font-weight: normal;
+    color: #fff;
+    letter-spacing: 0.22em;
+    line-height: 1.4;
+  }
+
+  #panel-right .sub {
+    font-size: 8.5px;
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 0.18em;
+    margin-top: 3px;
+  }
+
+  /* blinking cursor */
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .cursor { display: inline-block; animation: blink 1.1s infinite; }
+
+  /* subtle pulse on the title */
+  @keyframes pulse { 0%,100%{opacity:.88} 50%{opacity:.65} }
+  #panel-right h1 { animation: pulse 4s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div id="scanlines"></div>
+<div id="vignette"></div>
+
+<div class="panel" id="panel-left">
+  <div class="row-label">surface class</div>
+  <div class="row-val">NON-ORIENTABLE</div>
+  <hr>
+  <div class="row-label">topology</div>
+  <div class="row-val">ℝP² IMMERSION</div>
+  <hr>
+  <div class="row-label">euler characteristic</div>
+  <div class="row-val">χ = 1</div>
+  <hr>
+  <div class="row-label">self-intersection</div>
+  <div class="row-val">SINGLE CURVE</div>
+  <hr>
+  <div class="row-label">parametrization</div>
+  <div class="row-val">BRYANT – KUSNER</div>
+  <hr>
+  <div class="row-label">particle count</div>
+  <div class="row-val" id="pcount">COMPUTING<span class="cursor">_</span></div>
+</div>
+
+<div class="panel" id="panel-right">
+  <h1>BOY'S<br>SURFACE</h1>
+  <div class="sub">HOLOGRAPHIC PARTICLE SIMULATION</div>
+  <hr>
+  <div class="row-label" style="text-align:right;">discovered</div>
+  <div class="row-val">WERNER BOY, 1901</div>
+  <hr>
+  <div class="row-label" style="text-align:right;">ambient space</div>
+  <div class="row-val">ℝ³</div>
+  <hr>
+  <div class="row-label" style="text-align:right;">genus</div>
+  <div class="row-val">g = 1 (non-or.)</div>
+</div>
+
+<div class="panel" id="panel-bottom">
+  DRAG TO ROTATE &nbsp;·&nbsp; SCROLL TO ZOOM &nbsp;·&nbsp; DOUBLE-CLICK TO RESET
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── Complex arithmetic ────────────────────────────────────────────────────
+const cAdd = (a, b) => [a[0]+b[0], a[1]+b[1]];
+const cSub = (a, b) => [a[0]-b[0], a[1]-b[1]];
+const cMul = (a, b) => [a[0]*b[0] - a[1]*b[1],  a[0]*b[1] + a[1]*b[0]];
+const cDiv = (a, b) => {
+  const d = b[0]*b[0] + b[1]*b[1];
+  if (d < 1e-14) return [0, 0];
+  return [(a[0]*b[0] + a[1]*b[1]) / d, (a[1]*b[0] - a[0]*b[1]) / d];
+};
+const cPow = (w, n) => {
+  let r = [1, 0];
+  for (let i = 0; i < n; i++) r = cMul(r, w);
+  return r;
+};
+
+// ─── Bryant-Kusner parametrization of Boy's Surface ───────────────────────
+// Input: point on S² via spherical coords (θ∈[0,π], φ∈[0,2π])
+// Maps via stereographic projection → complex w, then applies rational map
+const S5 = Math.sqrt(5);
+
+function boysPoint(theta, phi) {
+  const sinT = Math.sin(theta);
+  const cosT = Math.cos(theta);
+  const x = sinT * Math.cos(phi);
+  const y = sinT * Math.sin(phi);
+  const z = cosT;
+
+  // Avoid north pole (z → 1)
+  const dz = 1.0 - z;
+  if (Math.abs(dz) < 0.005) return null;
+
+  const w = [x / dz, y / dz];
+  const wm = w[0]*w[0] + w[1]*w[1];
+  if (wm > 4e5) return null;            // filter near-pole divergence
+
+  const w3 = cPow(w, 3);
+  const w4 = cPow(w, 4);
+  const w6 = cPow(w, 6);
+
+  // denominator:  w⁶ + √5·w³ − 1
+  const denom = cSub(cAdd(w6, cMul([S5, 0], w3)), [1, 0]);
+  const dm = denom[0]*denom[0] + denom[1]*denom[1];
+  if (dm < 1e-14) return null;
+
+  // f₁ = −3/2 · Im[ w(1−w⁴) / denom ]
+  const q1 = cDiv(cMul(w, cSub([1,0], w4)), denom);
+  const f1 = -1.5 * q1[1];
+
+  // f₂ = −3/2 · Re[ w(1+w⁴) / denom ]
+  const q2 = cDiv(cMul(w, cAdd([1,0], w4)), denom);
+  const f2 = -1.5 * q2[0];
+
+  // f₃ = Im[ (1+w⁶) / denom ] − 1/2
+  const q3 = cDiv(cAdd([1,0], w6), denom);
+  const f3 = q3[1] - 0.5;
+
+  if (!isFinite(f1) || !isFinite(f2) || !isFinite(f3)) return null;
+  if (Math.abs(f1) > 12 || Math.abs(f2) > 12 || Math.abs(f3) > 12) return null;
+
+  return [f1, f2, f3];
+}
+
+// ─── Scene ────────────────────────────────────────────────────────────────
+const scene    = new THREE.Scene();
+const camera   = new THREE.PerspectiveCamera(48, innerWidth/innerHeight, 0.01, 500);
+camera.position.set(0, 0, 9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 1);
+document.body.appendChild(renderer.domElement);
+
+// ─── Particle generation ───────────────────────────────────────────────────
+const N_THETA = 520;
+const N_PHI   = 520;
+const pos = [];
+
+for (let i = 0; i <= N_THETA; i++) {
+  for (let j = 0; j <= N_PHI; j++) {
+    const theta = (i / N_THETA) * Math.PI;
+    const phi   = (j / N_PHI)   * 2.0 * Math.PI;
+    const p = boysPoint(theta, phi);
+    if (p) pos.push(p[0], p[1], p[2]);
+  }
+}
+
+document.getElementById('pcount').textContent =
+  (pos.length / 3).toLocaleString() + ' PTS';
+
+const geo = new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+
+// ─── Sprite texture: soft glowing disc ───────────────────────────────────
+const tc = document.createElement('canvas');
+tc.width = tc.height = 64;
+const tctx = tc.getContext('2d');
+const g = tctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+g.addColorStop(0.00, 'rgba(255,255,255,1.0)');
+g.addColorStop(0.18, 'rgba(255,255,255,0.85)');
+g.addColorStop(0.50, 'rgba(220,220,220,0.25)');
+g.addColorStop(1.00, 'rgba(255,255,255,0.0)');
+tctx.fillStyle = g;
+tctx.fillRect(0, 0, 64, 64);
+const spriteTex = new THREE.CanvasTexture(tc);
+
+const mat = new THREE.PointsMaterial({
+  color:       0xffffff,
+  size:        0.018,
+  map:         spriteTex,
+  blending:    THREE.AdditiveBlending,
+  transparent: true,
+  depthWrite:  false,
+  opacity:     0.90,
+  sizeAttenuation: true,
+});
+
+const points = new THREE.Points(geo, mat);
+scene.add(points);
+
+// ─── Faint axes / bounding sphere hint (optional wireframe) ──────────────
+// subtle holographic equatorial ring
+const ringGeo = new THREE.TorusGeometry(2.1, 0.003, 4, 180);
+const ringMat = new THREE.MeshBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.06,
+  blending: THREE.AdditiveBlending, depthWrite: false
+});
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = Math.PI / 2;
+scene.add(ring);
+
+// ─── Interaction state ────────────────────────────────────────────────────
+let isDrag = false, prevX = 0, prevY = 0;
+let rotX = 0.28, rotY = 0.0;
+let autoRot = 0.0;
+const AUTO_SPEED = 0.0025;
+
+renderer.domElement.addEventListener('mousedown',  e => { isDrag=true;  prevX=e.clientX; prevY=e.clientY; });
+renderer.domElement.addEventListener('mousemove',  e => {
+  if (!isDrag) return;
+  rotY += (e.clientX - prevX) * 0.006;
+  rotX += (e.clientY - prevY) * 0.006;
+  rotX = Math.max(-1.4, Math.min(1.4, rotX));
+  prevX=e.clientX; prevY=e.clientY;
+});
+renderer.domElement.addEventListener('mouseup',   () => isDrag=false);
+renderer.domElement.addEventListener('mouseleave',() => isDrag=false);
+
+renderer.domElement.addEventListener('wheel', e => {
+  camera.position.z += e.deltaY * 0.012;
+  camera.position.z  = Math.max(3, Math.min(22, camera.position.z));
+}, { passive: true });
+
+renderer.domElement.addEventListener('dblclick', () => {
+  rotX = 0.28; rotY = 0; autoRot = 0; camera.position.z = 9;
+});
+
+// touch
+renderer.domElement.addEventListener('touchstart', e => {
+  isDrag=true; prevX=e.touches[0].clientX; prevY=e.touches[0].clientY;
+}, { passive: true });
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!isDrag) return;
+  rotY += (e.touches[0].clientX - prevX) * 0.006;
+  rotX += (e.touches[0].clientY - prevY) * 0.006;
+  prevX=e.touches[0].clientX; prevY=e.touches[0].clientY;
+}, { passive: true });
+renderer.domElement.addEventListener('touchend', () => isDrag=false);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ─── Animate ──────────────────────────────────────────────────────────────
+let t = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.016;
+
+  if (!isDrag) autoRot += AUTO_SPEED;
+
+  // gentle breathing scale
+  const breathe = 1.0 + 0.012 * Math.sin(t * 0.55);
+  points.scale.setScalar(breathe);
+  ring.scale.setScalar(breathe);
+
+  points.rotation.x = rotX;
+  points.rotation.y = rotY + autoRot;
+  ring.rotation.y   = rotY + autoRot;
+
+  // particle opacity pulse (very subtle)
+  mat.opacity = 0.88 + 0.06 * Math.sin(t * 0.8);
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
